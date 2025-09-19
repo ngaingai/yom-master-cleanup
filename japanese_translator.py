@@ -7,15 +7,18 @@ the Japanese terms to English while preserving all numerical measurements.
 """
 
 import csv
-import re
-import sys
+import io
 import json
 import os
+import re
+import sys
 from typing import Dict, List, Tuple, Set
 
 
 class JapaneseDimensionTranslator:
-    def __init__(self, translations_file: str = "learned_translations.json"):
+    def __init__(self, 
+                 translations_file: str = "learned_translations.json", 
+                 care_labels_file: str = "care_labels.json"):
         # Translation dictionary for Japanese clothing measurement terms
         self.translations = {
             # Basic measurements
@@ -73,10 +76,12 @@ class JapaneseDimensionTranslator:
         
         # File to store learned translations
         self.translations_file = translations_file
+        self.care_labels_file = care_labels_file
         self.unknown_terms: Set[str] = set()
         
-        # Load previously learned translations
+        # Load previously learned translations and care labels
         self.load_learned_translations()
+        self.load_care_labels()
     
     def convert_fullwidth_to_halfwidth(self, text: str) -> str:
         """
@@ -296,6 +301,34 @@ class JapaneseDimensionTranslator:
         
         return materials, care_instructions, country
     
+    def translate_care_instructions(self, care_instructions: str) -> str:
+        """
+        Translate care instructions using the care labels dictionary.
+        
+        Args:
+            care_instructions: Japanese care instructions text
+            
+        Returns:
+            Translated English care instructions
+        """
+        if not care_instructions or not isinstance(care_instructions, str):
+            return care_instructions
+        
+        # Start with the original text
+        translated_text = care_instructions
+        
+        # Replace care label terms with English equivalents
+        # Sort by length (longest first) to prevent partial translations
+        sorted_care_labels = sorted(
+            self.care_labels.items(), 
+            key=lambda x: len(x[0]), 
+            reverse=True
+        )
+        for japanese, english in sorted_care_labels:
+            translated_text = translated_text.replace(japanese, english)
+        
+        return translated_text
+    
     def load_learned_translations(self) -> None:
         """Load previously learned translations from file."""
         if os.path.exists(self.translations_file):
@@ -307,11 +340,26 @@ class JapaneseDimensionTranslator:
             except (json.JSONDecodeError, IOError) as e:
                 print(f"Warning: Could not load learned translations: {e}")
     
+    def load_care_labels(self) -> None:
+        """Load care label translations from file."""
+        if os.path.exists(self.care_labels_file):
+            try:
+                with open(self.care_labels_file, 'r', encoding='utf-8') as f:
+                    self.care_labels = json.load(f)
+                    print(f"Loaded {len(self.care_labels)} care label translations.")
+            except (json.JSONDecodeError, IOError) as e:
+                print(f"Warning: Could not load care labels: {e}")
+                self.care_labels = {}
+        else:
+            self.care_labels = {}
+    
     def save_learned_translations(self) -> None:
         """Save learned translations to file, sorted by length (longest first)."""
         try:
             # Sort translations by length (longest first) for better organization
-            sorted_translations = dict(sorted(self.translations.items(), key=lambda x: len(x[0]), reverse=True))
+            sorted_translations = dict(
+                sorted(self.translations.items(), key=lambda x: len(x[0]), reverse=True)
+            )
             with open(self.translations_file, 'w', encoding='utf-8') as f:
                 json.dump(sorted_translations, f, ensure_ascii=False, indent=2)
         except IOError as e:
@@ -400,7 +448,11 @@ class JapaneseDimensionTranslator:
             
             # Replace Japanese terms with English equivalents
             # Sort by length (longest first) to prevent partial translations
-            sorted_translations = sorted(self.translations.items(), key=lambda x: len(x[0]), reverse=True)
+            sorted_translations = sorted(
+                self.translations.items(), 
+                key=lambda x: len(x[0]), 
+                reverse=True
+            )
             for japanese, english in sorted_translations:
                 translated_line = translated_line.replace(japanese, english)
             
@@ -420,15 +472,23 @@ class JapaneseDimensionTranslator:
         
         return translated_text
     
-    def process_csv_file(self, input_file: str, output_file: str = None, interactive: bool = True, materials_column: int = 2) -> None:
+    def process_csv_file(self, 
+                        input_file: str, 
+                        output_file: str = None, 
+                        interactive: bool = True, 
+                        materials_column: int = 1) -> None:
         """
-        Process a CSV file and translate Japanese content in column A to English in column B.
+        Process a CSV file and translate Japanese content.
+        Input: Column A = Japanese dimensions, Column B = Japanese materials
+        Output: A=Japanese dimensions, B=English dimensions, C=Japanese materials, 
+                D=English materials, E=Japanese care labels, F=English care labels, G=country
         
         Args:
             input_file: Path to input CSV file
             output_file: Path to output CSV file (optional, defaults to input_file_translated.csv)
             interactive: Whether to interactively learn new terms
-            materials_column: Which column (0-based index) contains materials to translate (default: 2, which is column C)
+            materials_column: Which column (0-based index) contains materials to translate 
+                              (default: 1, which is column B)
         """
         if output_file is None:
             # Create output filename based on input filename
@@ -452,7 +512,6 @@ class JapaneseDimensionTranslator:
                     delimiter = ','
                 
                 # Use StringIO to properly parse the CSV content
-                import io
                 csv_reader = csv.reader(io.StringIO(content), delimiter=delimiter, quoting=csv.QUOTE_ALL)
                 
                 with open(output_file, 'w', encoding='utf-8', newline='') as outfile:
@@ -470,54 +529,57 @@ class JapaneseDimensionTranslator:
                             writer.writerow([''])
                             continue
                         
-                        # Get the Japanese content from column A
-                        japanese_content = row[0]
+                        # Get the Japanese content from column A (dimensions)
+                        japanese_dimensions = row[0]
                         
-                        # Translate to English
-                        english_content = self.translate_text(japanese_content, interactive)
-                        
-                        # Create new row with original in column A and translation in column B
-                        # Ensure multi-line content is properly handled
-                        new_row = [japanese_content, english_content]
+                        # Translate dimensions to English
+                        english_dimensions = self.translate_text(japanese_dimensions, interactive)
                         
                         # Handle materials column (if present and specified)
                         if len(row) > materials_column:
-                            full_content = row[materials_column]
+                            full_materials_content = row[materials_column]
                             
                             # Split the content into materials, care instructions, and country
-                            materials_content, care_instructions, country = self.split_materials_content(full_content)
+                            materials_content, care_instructions, country = self.split_materials_content(
+                                full_materials_content
+                            )
                             
                             # Translate materials to English
                             materials_english = self.translate_text(materials_content, interactive)
                             
-                            # Add all columns up to materials column (but skip the materials column itself)
-                            for i in range(1, materials_column):
-                                if i < len(row):
-                                    new_row.append(row[i])
+                            # Translate care instructions to English
+                            care_instructions_english = self.translate_care_instructions(care_instructions)
                             
-                            # Add split content: materials (original), materials (translated), care instructions, country
-                            new_row.extend([materials_content, materials_english, care_instructions, country])
-                            
-                            # Add any remaining columns after materials
-                            if len(row) > materials_column + 1:
-                                new_row.extend(row[materials_column + 1:])
+                            # Create new row with the correct output format:
+                            # A=Japanese dimensions, B=English dimensions, C=Japanese materials, 
+                            # D=English materials, E=Japanese care labels, F=English care labels, G=country
+                            new_row = [
+                                japanese_dimensions,      # A: Japanese dimensions
+                                english_dimensions,       # B: English dimensions
+                                materials_content,        # C: Japanese materials
+                                materials_english,        # D: English materials
+                                care_instructions,        # E: Japanese care labels
+                                care_instructions_english, # F: English care labels
+                                country                   # G: Country of origin
+                            ]
                         else:
-                            # No materials column, just add remaining columns
-                            if len(row) > 1:
-                                new_row.extend(row[1:])
+                            # No materials column, just dimensions
+                            new_row = [japanese_dimensions, english_dimensions]
                         
                         writer.writerow(new_row)
                         
                         # Print progress for first few rows
                         if row_num <= 5:
                             print(f"Row {row_num}:")
-                            print(f"  Japanese: {japanese_content}")
-                            print(f"  English:  {english_content}")
+                            print(f"  Japanese Dimensions: {japanese_dimensions}")
+                            print(f"  English Dimensions:  {english_dimensions}")
                             if len(row) > materials_column:
-                                print(f"  Materials: {materials_content}")
-                                print(f"  Materials EN: {materials_english}")
+                                print(f"  Japanese Materials: {materials_content}")
+                                print(f"  English Materials: {materials_english}")
                                 if care_instructions:
-                                    print(f"  Care Instructions: {care_instructions[:50]}...")
+                                    print(f"  Japanese Care Instructions: {care_instructions[:50]}...")
+                                    print(f"  English Care Instructions: "
+                                          f"{care_instructions_english[:50]}...")
                                 if country:
                                     print(f"  Country: {country}")
                             print()
@@ -540,36 +602,42 @@ class JapaneseDimensionTranslator:
                                 writer.writerow([''])
                                 continue
                             
-                            japanese_content = row[0]
-                            english_content = self.translate_text(japanese_content, interactive=False)
+                            # Get the Japanese content from column A (dimensions)
+                            japanese_dimensions = row[0]
                             
-                            new_row = [japanese_content, english_content]
+                            # Translate dimensions to English
+                            english_dimensions = self.translate_text(japanese_dimensions, interactive=False)
                             
                             # Handle materials column (if present and specified)
                             if len(row) > materials_column:
-                                full_content = row[materials_column]
+                                full_materials_content = row[materials_column]
                                 
                                 # Split the content into materials, care instructions, and country
-                                materials_content, care_instructions, country = self.split_materials_content(full_content)
+                                materials_content, care_instructions, country = self.split_materials_content(
+                                    full_materials_content
+                                )
                                 
                                 # Translate materials to English
                                 materials_english = self.translate_text(materials_content, interactive=False)
                                 
-                                # Add all columns up to materials column (but skip the materials column itself)
-                                for i in range(1, materials_column):
-                                    if i < len(row):
-                                        new_row.append(row[i])
+                                # Translate care instructions to English
+                                care_instructions_english = self.translate_care_instructions(care_instructions)
                                 
-                                # Add split content: materials (original), materials (translated), care instructions, country
-                                new_row.extend([materials_content, materials_english, care_instructions, country])
-                                
-                                # Add any remaining columns after materials
-                                if len(row) > materials_column + 1:
-                                    new_row.extend(row[materials_column + 1:])
+                                # Create new row with the correct output format:
+                                # A=Japanese dimensions, B=English dimensions, C=Japanese materials, 
+                                # D=English materials, E=Japanese care labels, F=English care labels, G=country
+                                new_row = [
+                                    japanese_dimensions,      # A: Japanese dimensions
+                                    english_dimensions,       # B: English dimensions
+                                    materials_content,        # C: Japanese materials
+                                    materials_english,        # D: English materials
+                                    care_instructions,        # E: Japanese care labels
+                                    care_instructions_english, # F: English care labels
+                                    country                   # G: Country of origin
+                                ]
                             else:
-                                # No materials column, just add remaining columns
-                                if len(row) > 1:
-                                    new_row.extend(row[1:])
+                                # No materials column, just dimensions
+                                new_row = [japanese_dimensions, english_dimensions]
                             
                             writer.writerow(new_row)
             
@@ -605,12 +673,13 @@ def main():
     translator = JapaneseDimensionTranslator()
     
     if len(sys.argv) < 2:
-        print("Usage: python japanese_translator.py <input_csv_file> [output_csv_file] [--no-learn] [--materials-col=<number>]")
+        print("Usage: python japanese_translator.py <input_csv_file> [output_csv_file] "
+              "[--no-learn] [--materials-col=<number>]")
         print("\nExample:")
         print("  python japanese_translator.py products.csv")
         print("  python japanese_translator.py products.csv translated_products.csv")
         print("  python japanese_translator.py products.csv --no-learn  # Skip learning new terms")
-        print("  python japanese_translator.py products.csv --materials-col=1  # Materials in column B")
+        print("  python japanese_translator.py products.csv --materials-col=1  # Materials in column B (default)")
         print("  python japanese_translator.py products.csv --materials-col=2  # Materials in column C")
         print("\nTo see available translations:")
         print("  python japanese_translator.py --list")
@@ -624,7 +693,7 @@ def main():
     input_file = sys.argv[1]
     output_file = None
     interactive = True
-    materials_column = 2  # Default to column C (index 2)
+    materials_column = 1  # Default to column B (index 1)
     
     for arg in sys.argv[2:]:
         if arg == "--no-learn":
@@ -643,7 +712,8 @@ def main():
         print("Learning mode: DISABLED (using existing translations only)")
     else:
         print("Learning mode: ENABLED (will learn new terms interactively)")
-    print(f"Materials column: {materials_column + 1} (Column {chr(65 + materials_column + 1)})")
+    print(f"Materials column: {materials_column + 1} "
+          f"(Column {chr(65 + materials_column + 1)})")
     
     translator.process_csv_file(input_file, output_file, interactive, materials_column)
 

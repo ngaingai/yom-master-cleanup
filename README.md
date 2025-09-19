@@ -12,6 +12,9 @@ A Python program that translates Japanese product dimensions to English while pr
 - **Smart Learning**: Automatically detects unknown Japanese terms
 - **Interactive Learning**: Prompts for translations of new terms
 - **Persistent Memory**: Saves learned translations for future use
+- **Materials Translation**: Translates product materials from Japanese to English
+- **Care Labels Translation**: Translates care instructions using comprehensive care labels dictionary
+- **Content Splitting**: Automatically splits materials content into materials, care instructions, and country of origin
 - Extensible translation dictionary
 
 ## Usage
@@ -30,6 +33,17 @@ python3 japanese_translator.py input_file.csv output_file.csv
 ```bash
 python3 japanese_translator.py input_file.csv --no-learn
 ```
+
+### Process Materials Column
+```bash
+python3 japanese_translator.py input_file.csv --materials-col=2
+```
+This will process materials in column C (index 2) and split them into:
+- Column C: Original materials
+- Column D: Translated materials  
+- Column E: Care instructions (original)
+- Column F: Care instructions (translated)
+- Column G: Country of origin
 
 ### View Available Translations
 ```bash
@@ -50,6 +64,17 @@ When unknown terms are found, the program will:
 
 ### Persistent Memory
 All learned translations are saved to `learned_translations.json` and will be automatically loaded in future runs.
+
+## Care Labels Translation
+
+The program includes a comprehensive care labels dictionary (`care_labels.json`) with translations for common Japanese care instructions such as:
+
+- ※洗濯機不可・手洗いのみ。 → Do not machine wash; hand wash only.
+- ※ドライクリーニング不可。 → Do not dry clean.
+- ※色移りする事がありますので、淡色のものと分けて洗ってください。 → Wash separately from light-colored items, as color transfer may occur.
+- And many more...
+
+Care instructions are automatically translated when processing materials columns.
 
 ## Example
 
